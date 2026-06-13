@@ -18,9 +18,13 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--locomotion_policy", type=str, default=None)
+    parser.add_argument("--resume", type=str, default=None)
     known_args, argv = parser.parse_known_args(sys.argv[1:])
     if known_args.locomotion_policy:
         os.environ["H1_LOCOMOTION_POLICY_PATH"] = known_args.locomotion_policy
+    
+    # Handle --resume separately to avoid Hydra parsing issues
+    resume_path = known_args.resume
 
     sys.path.insert(0, str(PROJECT_ROOT))
     sys.path.insert(0, str(RL_SCRIPT.parent))
@@ -32,6 +36,11 @@ def main() -> None:
         argv = ["--task", TRAIN_TASK_ID, *argv]
 
     namespace = runpy.run_path(str(RL_SCRIPT))
+    
+    # Add resume path back to argv if provided (use + prefix for Hydra)
+    if resume_path:
+        argv = [*argv, f"+resume={resume_path}"]
+    
     namespace["run"](argv)
 
 

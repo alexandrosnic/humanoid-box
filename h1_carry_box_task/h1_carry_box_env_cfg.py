@@ -54,6 +54,9 @@ def _resolve_locomotion_policy_path() -> str:
 # ---------------------------------------------------------------------------
 @configclass
 class H1CarryBoxSceneCfg(MySceneCfg):
+    # Note: Ground plane is inherited from MySceneCfg
+    # To customize ground appearance, modify the parent class or use terrain config
+    
     carry_box = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/CarryBox",
         # Box long side (0.32m) is now in y-direction (perpendicular to arms)
@@ -64,7 +67,7 @@ class H1CarryBoxSceneCfg(MySceneCfg):
                 enable_gyroscopic_forces=True,
                 disable_gravity=False,
             ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=3.0),
+            mass_props=sim_utils.MassPropertiesCfg(mass=5.0),  # Increased to 5kg as requested
             collision_props=sim_utils.CollisionPropertiesCfg(
                 collision_enabled=True,  # Explicitly enable collision
             ),
@@ -94,7 +97,7 @@ class LowLevelLocomotionObservationsCfg(ObsGroup):
 
 
 # ---------------------------------------------------------------------------
-# Actions: increased arm scale for larger reaching motions
+# Actions: arms controlled by high-level policy, torso by locomotion
 # ---------------------------------------------------------------------------
 @configclass
 class ActionsCfg:
@@ -109,16 +112,33 @@ class ActionsCfg:
             ".*_hip_pitch",
             ".*_knee",
             ".*_ankle",
-            "torso",
+            "torso",  # Added back - locomotion policy controls torso yaw for stability
         ],
         low_level_decimation=4,
         policy_output_scale=0.5,
     )
     arms = locomotion_mdp.JointPositionActionCfg(
         asset_name="robot",
-        joint_names=[".*_shoulder_pitch", ".*_shoulder_roll", ".*_shoulder_yaw", ".*_elbow"],
-        scale=0.5,
-        use_default_offset=True,
+        joint_names=[
+            ".*_shoulder_pitch",
+            ".*_shoulder_roll",
+            ".*_shoulder_yaw",
+            ".*_elbow",
+        ],
+        scale=0.15,
+        use_default_offset=False,  # Use explicit offsets below
+        # Explicit offsets: arms forward, elbows bent to cradle box
+        # Order matches joint_names: shoulder_pitch, shoulder_roll, shoulder_yaw, elbow (×2 sides)
+        offset={
+            "left_shoulder_pitch": -0.4,   # upper arm slightly forward-down
+            "right_shoulder_pitch": -0.4,  # upper arm slightly forward-down
+            "left_shoulder_roll": -0.25,   # rolled inward to narrow arm gap
+            "right_shoulder_roll": 0.25,   # rolled inward to narrow arm gap
+            "left_shoulder_yaw": 0.0,      # elbows pointing down/forward
+            "right_shoulder_yaw": 0.0,     # elbows pointing down/forward
+            "left_elbow": -0.1,             # bent ~70 degrees to form a tray
+            "right_elbow": -0.1,            # bent ~70 degrees to form a tray
+        },
     )
 
 
@@ -225,7 +245,8 @@ class H1CarryBoxEventsCfg(VelocityEventsCfg):
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("carry_box"),
-            "box_pos_in_robot_frame": (0.35, 0.0, 0.4),
+            # Box moved closer (0.25m) and lower (0.32m) to rest on forearms
+            "box_pos_in_robot_frame": (0.25, 0.0, 0.32),
             "pose_range": {
                 "x": (-0.03, 0.03),
                 "y": (-0.03, 0.03),
@@ -259,6 +280,12 @@ class H1CarryBoxRewards(H1Rewards):
         weight=-0.02,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_shoulder_pitch", ".*_shoulder_roll", ".*_elbow"])},
     )
+    # Penalize fast arm movements to make carrying smooth and stable
+    joint_vel_arms = RewTerm(
+        func=locomotion_mdp.joint_vel_l2,
+        weight=-0.2,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_shoulder_.*", ".*_elbow"])},
+    )
     # Strong penalty to prevent arms from swinging behind the body
     shoulder_yaw_penalty = RewTerm(
         func=locomotion_mdp.joint_deviation_l1,
@@ -276,14 +303,20 @@ class H1CarryBoxRewards(H1Rewards):
     # Reward hands for being UNDER the box (cradle position)
     hands_under_box = RewTerm(
         func=carry_rewards.hands_under_box_tanh,
-        params={"std": 0.1},
-        weight=3.0,
+        params={"std": 0.2},
+        weight=1.5,
     )
     # Reward box for resting on top of the arms
     box_on_arms = RewTerm(
         func=carry_rewards.box_resting_on_arms_tanh,
-        params={"std": 0.1},
-        weight=2.0,
+        params={"std": 0.2},
+        weight=1.0,
+    )
+    # Keep box close to torso (reduces tipping moment)
+    box_close_to_torso = RewTerm(
+        func=carry_rewards.box_close_to_torso_tanh,
+        params={"std": 0.15},
+        weight=1.0,
     )
     # Keep hands symmetric (centered under box)
     symmetric_grasp = RewTerm(
@@ -305,13 +338,30 @@ class H1CarryBoxRewards(H1Rewards):
     )
     box_upright = RewTerm(
         func=carry_rewards.box_upright_tanh,
-        params={"std": 0.15},
-        weight=1.0,
+        params={"std": 0.05},  # Tighten to ~3 degrees for precise horizontal alignment
+        weight=3.0,            # Increase weight to strongly enforce keeping the box flat
     )
     box_carry_velocity = RewTerm(
         func=carry_rewards.box_carry_velocity_tracking_exp,
         params={"std": 0.25},
         weight=0.0,
+    )
+    # Upright posture: penalize robot from leaning forward (pitch)
+    # This prevents the box weight from pulling the robot forward
+    upright_posture = RewTerm(
+        func=carry_rewards.upright_posture_penalty,
+        params={"std": 0.15},
+        weight=1.5,  # Always active to maintain balance
+    )
+    # Note: Removed torso_lean_back and torso_forward_penalty
+    # The H1's torso joint is YAW (left/right rotation), not PITCH (forward/back)
+    # It cannot help with forward/backward balance when carrying a box
+    # Hold duration: reward for each timestep the box is held above minimum height
+    # This explicitly incentivizes longer holds
+    box_hold_duration = RewTerm(
+        func=carry_rewards.box_height_above_minimum,
+        params={"minimum_height": 0.3},  # Box must be above 0.3m to count as "held"
+        weight=0.1,  # Reduced to prevent survival/standing-still bias
     )
 
 
@@ -325,44 +375,47 @@ class H1CarryBoxTerminationsCfg(VelocityTerminationsCfg):
         params={"minimum_height": 0.03, "asset_cfg": SceneEntityCfg("carry_box")},
     )
     carry_box_too_far = DoneTerm(func=carry_terminations.box_too_far_from_robot, params={"max_distance": 1.25})
+    # Terminate episode when robot falls (root height below threshold)
+    robot_fallen = DoneTerm(
+        func=locomotion_mdp.root_height_below_minimum,
+        params={"minimum_height": 0.5, "asset_cfg": SceneEntityCfg("robot")},  # Robot falls if height < 0.5m
+    )
 
 
 # ---------------------------------------------------------------------------
 # Curriculum: phased introduction of lift and carry rewards
-#   Steps  0-30k: Only grasp rewards active (Phase 1)
-#   Steps 30k+:   Lift reward ramps up (Phase 2a)
-#   Steps 50k+:   Carry velocity reward ramps up (Phase 2b)
 # ---------------------------------------------------------------------------
 @configclass
 class H1CarryBoxCurriculumCfg(VelocityCurriculumCfg):
     box_lift = CurrTerm(
-        func=locomotion_mdp.modify_reward_weight,
-        params={"term_name": "box_lift", "weight": 3.0, "num_steps": 30000},
+        func=carry_curriculums.ramp_reward_weight,
+        params={"term_name": "box_lift", "start_step": 3000, "end_step": 6000, "target_weight": 0.5},
     )
     box_carry_velocity = CurrTerm(
-        func=locomotion_mdp.modify_reward_weight,
-        params={"term_name": "box_carry_velocity", "weight": 2.0, "num_steps": 50000},
+        func=carry_curriculums.ramp_reward_weight,
+        params={"term_name": "box_carry_velocity", "start_step": 3000, "end_step": 8000, "target_weight": 4.0},
     )
+    # Locomotion rewards - moderate weights to encourage walking without causing "dancing"
     track_lin_vel_xy = CurrTerm(
-        func=locomotion_mdp.modify_reward_weight,
-        params={"term_name": "track_lin_vel_xy_exp", "weight": 0.75, "num_steps": 50000},
+        func=carry_curriculums.ramp_reward_weight,
+        params={"term_name": "track_lin_vel_xy_exp", "start_step": 3000, "end_step": 8000, "target_weight": 3.5},
     )
     track_ang_vel_z = CurrTerm(
-        func=locomotion_mdp.modify_reward_weight,
-        params={"term_name": "track_ang_vel_z_exp", "weight": 0.35, "num_steps": 50000},
+        func=carry_curriculums.ramp_reward_weight,
+        params={"term_name": "track_ang_vel_z_exp", "start_step": 3000, "end_step": 8000, "target_weight": 0.75},
     )
     feet_air_time = CurrTerm(
-        func=locomotion_mdp.modify_reward_weight,
-        params={"term_name": "feet_air_time", "weight": 0.35, "num_steps": 50000},
+        func=carry_curriculums.ramp_reward_weight,
+        params={"term_name": "feet_air_time", "start_step": 3000, "end_step": 8000, "target_weight": 0.75},
     )
     carry_box_mass = CurrTerm(
         func=carry_curriculums.increase_box_mass_range,
         params={
             "term_name": "carry_box_mass",
             "stages": (
-                (15000, (0.9, 1.05)),
-                (40000, (1.0, 1.15)),
-                (80000, (1.0, 1.25)),
+                (3000, (0.9, 1.05)),
+                (10000, (1.0, 1.15)),
+                (20000, (1.0, 1.25)),
             ),
         },
     )
@@ -382,14 +435,18 @@ class H1CarryBoxEnvCfg(H1FlatEnvCfg):
     curriculum: H1CarryBoxCurriculumCfg = H1CarryBoxCurriculumCfg()
 
     # Target positions (in robot base frame)
-    carry_box_target_pos_b = (0.35, 0.0, -0.2)
-    # Hand offsets match new box width (0.32m in y-direction)
-    carry_box_left_hand_target_offset_b = (0.0, 0.16, 0.0)
-    carry_box_right_hand_target_offset_b = (0.0, -0.16, 0.0)
+    # Box moved closer (0.25m) and lower (0.32m) to rest on forearms
+    carry_box_target_pos_b = (0.25, 0.0, 0.32)
+    # Hand offsets match new inward box spacing (0.292m in y-direction)
+    carry_box_left_hand_target_offset_b = (0.0, 0.146, 0.0)
+    carry_box_right_hand_target_offset_b = (0.0, -0.146, 0.0)
     carry_box_torso_target_pos_t = (0.2, 0.0, -0.1)
 
     def __post_init__(self):
         super().__post_init__()
+
+        # Disable base_contact termination to prevent resets when the box touches the torso
+        self.terminations.base_contact = None
 
         # Create robot config with custom initial joint positions
         # Use deepcopy to ensure we're not modifying a shared reference
@@ -407,16 +464,25 @@ class H1CarryBoxEnvCfg(H1FlatEnvCfg):
         
         # Clear existing joint positions and set our own
         # Use EXPLICIT joint names instead of regex to ensure they match
-        # shoulder_pitch: 0 = arm down at side, positive = arm forward (we hope)
+        # Keep the crucial leg and torso joint positions so the locomotion policy operates correctly,
+        # and set the arms to a forward cradle position.
         robot_cfg.init_state.joint_pos = {
-            "left_shoulder_pitch": -0.7,   # arm very forward
-            "right_shoulder_pitch": -0.7,  # arm very forward
+            # Legs & Torso (locomotion defaults)
+            ".*_hip_yaw": 0.0,
+            ".*_hip_roll": 0.0,
+            ".*_hip_pitch": -0.28,
+            ".*_knee": 0.79,
+            ".*_ankle": -0.52,
+            "torso": 0.0,
+            # Arms (custom carriage posture)
+            "left_shoulder_pitch": -0.4,
+            "right_shoulder_pitch": -0.4,
             "left_shoulder_yaw": 0.0,
             "right_shoulder_yaw": 0.0,
-            "left_elbow": 0.5,   # aggressively bent to grip box
-            "right_elbow": 0.5,  # aggressively bent to grip box
-            "left_shoulder_roll": 0.1,   # arm slightly outward (closer to box)
-            "right_shoulder_roll": -0.1, # arm slightly outward (closer to box)
+            "left_elbow": -0.1,
+            "right_elbow": -0.1,
+            "left_shoulder_roll": -0.25,  # rolled inward
+            "right_shoulder_roll": 0.25,   # rolled inward
         }
         
         self.scene.robot = robot_cfg
@@ -435,8 +501,8 @@ class H1CarryBoxEnvCfg(H1FlatEnvCfg):
 
         self.commands.base_velocity.heading_command = False
         self.commands.base_velocity.rel_heading_envs = 0.0
-        self.commands.base_velocity.rel_standing_envs = 0.15
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.35)
+        self.commands.base_velocity.rel_standing_envs = 0.0  # Force moving during training
+        self.commands.base_velocity.ranges.lin_vel_x = (0.15, 0.35)  # Require forward walking speed
         self.commands.base_velocity.ranges.lin_vel_y = (-0.05, 0.05)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.2, 0.2)
 
@@ -446,6 +512,9 @@ class H1CarryBoxEnvCfg(H1FlatEnvCfg):
         self.rewards.track_ang_vel_z_exp.weight = 0.0
         self.rewards.action_rate_l2.weight = -0.0025
         self.rewards.dof_acc_l2.weight = -1.25e-7
+        
+        # Override termination penalty to encourage exploration of walking motions
+        self.rewards.termination_penalty.weight = -50.0
 
         self.curriculum.terrain_levels = None
         self.events.base_external_force_torque = None

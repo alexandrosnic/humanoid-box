@@ -29,3 +29,37 @@ class increase_box_mass_range(ManagerTermBase):
             env.event_manager.set_term_cfg(term_name, self._term_cfg)
 
         return float(self._term_cfg.params["mass_distribution_params"][1])
+
+
+class ramp_reward_weight(ManagerTermBase):
+    """Gradually ramp up a reward weight over training steps."""
+
+    def __init__(self, cfg: CurriculumTermCfg, env):
+        super().__init__(cfg, env)
+        self._term_name = cfg.params["term_name"]
+        self._term_cfg = env.reward_manager.get_term_cfg(self._term_name)
+
+    def __call__(
+        self,
+        env,
+        env_ids: Sequence[int],
+        term_name: str,
+        start_step: int,
+        end_step: int,
+        target_weight: float,
+    ) -> float:
+        current_step = env.common_step_counter
+        if current_step < start_step:
+            weight = 0.0
+        elif current_step > end_step:
+            weight = target_weight
+        else:
+            # Linear interpolation
+            weight = target_weight * (current_step - start_step) / (end_step - start_step)
+
+        if self._term_cfg.weight != weight:
+            self._term_cfg.weight = weight
+            env.reward_manager.set_term_cfg(self._term_name, self._term_cfg)
+
+        return weight
+

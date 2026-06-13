@@ -61,10 +61,29 @@ class FrozenLocomotionPolicyAction(ActionTerm):
                 self._low_level_full_actions[env.episode_length_buf == 0, :] = 0
             return self._low_level_full_actions
 
+        # Build original locomotion default joint positions (where arms default is 0.0)
+        loco_defaults = torch.zeros((env.num_envs, len(self._all_joint_ids)), device=env.device)
+        for idx, name in enumerate(self._all_joint_names):
+            if "hip_pitch" in name:
+                loco_defaults[:, idx] = -0.28
+            elif "knee" in name:
+                loco_defaults[:, idx] = 0.79
+            elif "ankle" in name:
+                loco_defaults[:, idx] = -0.52
+            else:
+                loco_defaults[:, idx] = 0.0
+
+        def correct_joint_pos(dummy_env):
+            # Calculate positions relative to original locomotion defaults, NOT custom carry defaults
+            pos = self.robot.data.joint_pos[:, self._all_joint_ids]
+            return pos - loco_defaults
+
         low_level_obs_cfg.actions.func = lambda dummy_env: last_low_level_action()
         low_level_obs_cfg.actions.params = dict()
         low_level_obs_cfg.velocity_commands.func = lambda dummy_env: self._raw_actions
         low_level_obs_cfg.velocity_commands.params = dict()
+        low_level_obs_cfg.joint_pos.func = correct_joint_pos
+        low_level_obs_cfg.joint_pos.params = dict()
         self._low_level_obs_manager = ObservationManager({"ll_policy": low_level_obs_cfg}, env)
 
         action_name_to_index = {name: index for index, name in enumerate(self._all_joint_names)}
@@ -87,7 +106,13 @@ class FrozenLocomotionPolicyAction(ActionTerm):
         return self._raw_actions
 
     def process_actions(self, actions: torch.Tensor):
-        self._raw_actions[:] = actions
+        # Scale actions from [-1, 1] to target locomotion velocity ranges
+        # vx: [-1, 1] -> [-0.05, 0.40] m/s (maps to actions[:, 0] * 0.225 + 0.175)
+        self._raw_actions[:, 0] = actions[:, 0] * 0.225 + 0.175
+        # vy: [-1, 1] -> [-0.10, 0.10] m/s
+        self._raw_actions[:, 1] = actions[:, 1] * 0.10
+        # wz: [-1, 1] -> [-0.25, 0.25] rad/s
+        self._raw_actions[:, 2] = actions[:, 2] * 0.25
 
     def apply_actions(self):
         if self._counter % self.cfg.low_level_decimation == 0:

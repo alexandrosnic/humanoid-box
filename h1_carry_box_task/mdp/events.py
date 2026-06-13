@@ -102,3 +102,31 @@ def reset_box_in_carry_pose(
 
     carry_box.write_root_pose_to_sim_index(root_pose=torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
     carry_box.write_root_velocity_to_sim_index(root_velocity=velocities, env_ids=env_ids)
+
+
+def reset_box_on_table(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    pose_range: dict[str, tuple[float, float]],
+    velocity_range: dict[str, tuple[float, float]],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("carry_box"),
+    table_pos: tuple[float, float, float] = (0.55, 0.0, 0.89),
+):
+    carry_box: RigidObject = env.scene[asset_cfg.name]
+    origins = env.scene.env_origins[env_ids]
+
+    pose_samples = _sample_range_tensor(env, env_ids, pose_range)
+    box_offset = torch.tensor(table_pos, device=carry_box.device, dtype=torch.float32).unsqueeze(0).repeat(
+        len(env_ids), 1
+    )
+
+    positions = origins + box_offset + pose_samples[:, :3]
+    orientations = math_utils.quat_from_euler_xyz(
+        pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
+    )
+
+    velocity_samples = _sample_range_tensor(env, env_ids, velocity_range)
+
+    carry_box.write_root_pose_to_sim_index(root_pose=torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
+    carry_box.write_root_velocity_to_sim_index(root_velocity=velocity_samples, env_ids=env_ids)
+

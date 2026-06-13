@@ -9,17 +9,17 @@ class H1CarryBoxPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 3000
     save_interval = 50
     experiment_name = "h1_carry_box"
-    empirical_normalization = False
+    empirical_normalization = True
     actor = RslRlMLPModelCfg(
         hidden_dims=[256, 128, 128],
         activation="elu",
-        obs_normalization=False,
+        obs_normalization=True,
         distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
     )
     critic = RslRlMLPModelCfg(
         hidden_dims=[256, 128, 128],
         activation="elu",
-        obs_normalization=False,
+        obs_normalization=True,
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
@@ -28,7 +28,7 @@ class H1CarryBoxPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         entropy_coef=0.01,
         num_learning_epochs=5,
         num_mini_batches=4,
-        learning_rate=7.5e-4,
+        learning_rate=3e-4,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
