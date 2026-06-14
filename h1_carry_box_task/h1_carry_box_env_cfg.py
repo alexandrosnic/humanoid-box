@@ -350,8 +350,8 @@ class H1CarryBoxRewards(H1Rewards):
     # This prevents the box weight from pulling the robot forward
     upright_posture = RewTerm(
         func=carry_rewards.upright_posture_penalty,
-        params={"std": 0.15},
-        weight=1.5,  # Always active to maintain balance
+        params={"std": 0.10},  # Tightened from 0.15 to be more sensitive to forward lean
+        weight=3.0,            # Increased from 1.5 to prioritize balance under load
     )
     # Note: Removed torso_lean_back and torso_forward_penalty
     # The H1's torso joint is YAW (left/right rotation), not PITCH (forward/back)
@@ -393,12 +393,12 @@ class H1CarryBoxCurriculumCfg(VelocityCurriculumCfg):
     )
     box_carry_velocity = CurrTerm(
         func=carry_curriculums.ramp_reward_weight,
-        params={"term_name": "box_carry_velocity", "start_step": 3000, "end_step": 8000, "target_weight": 4.0},
+        params={"term_name": "box_carry_velocity", "start_step": 3000, "end_step": 8000, "target_weight": 2.5}, # Reduced from 4.0 to prevent sprinting/tipping forward
     )
     # Locomotion rewards - moderate weights to encourage walking without causing "dancing"
     track_lin_vel_xy = CurrTerm(
         func=carry_curriculums.ramp_reward_weight,
-        params={"term_name": "track_lin_vel_xy_exp", "start_step": 3000, "end_step": 8000, "target_weight": 3.5},
+        params={"term_name": "track_lin_vel_xy_exp", "start_step": 3000, "end_step": 8000, "target_weight": 2.5}, # Reduced from 3.5 to balance velocity tracking vs upright posture
     )
     track_ang_vel_z = CurrTerm(
         func=carry_curriculums.ramp_reward_weight,

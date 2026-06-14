@@ -50,9 +50,8 @@ The stage-2 environment defaults were reduced accordingly:
 - play envs: `8`
 - smaller PPO MLP than before
 
-## Stage 1: train the H1 locomotion prior (Standard or AMP)
+## Stage 1: train the H1 locomotion prior
 
-### Option A: Standard H1 Locomotion Prior
 This trains Isaac Lab's built-in `Isaac-Velocity-Flat-H1-v0` task through a local wrapper.
 
 ```powershell
@@ -60,26 +59,17 @@ Set-Location C:\Users\alexa\IsaacLab
 .\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train_locomotion.py --viz none --num_envs 128
 ```
 
-### Option B: AMP-Regularized Locomotion Prior (Natural Gait)
-This trains our custom task `Isaac-Velocity-Flat-H1-AMP-v0` which loads reference human walk trajectories from `humanoid_walk.npz` and maps them onto the H1 robot's 19 active joints, forcing the robot to learn a natural, human-like gait instead of standard shuffling.
-
-```powershell
-Set-Location C:\Users\alexa\IsaacLab
-.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train_locomotion.py --task Isaac-Velocity-Flat-H1-AMP-v0 --viz none --num_envs 128
-```
-
 For a quick smoke run:
 
 ```powershell
 Set-Location C:\Users\alexa\IsaacLab
-.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train_locomotion.py --task Isaac-Velocity-Flat-H1-AMP-v0 --viz none --num_envs 32 --max_iterations 10
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train_locomotion.py --viz none --num_envs 32 --max_iterations 10
 ```
 
 The locomotion checkpoints are written under:
 
 ```text
-C:\Users\alexa\IsaacLab\logs\rsl_rl\h1_flat\ (Option A)
-C:\Users\alexa\IsaacLab\logs\rsl_rl\h1_amp_locomotion\ (Option B)
+C:\Users\alexa\IsaacLab\logs\rsl_rl\h1_flat\
 ```
 
 ## Stage 1.5: export the locomotion policy
@@ -97,65 +87,76 @@ By default this writes:
 C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
 ```
 
-## Stage 2: Table Grasping, Lifting, and Carrying
+## Stage 2A: train a stationary hold policy
 
-This trains the active table-top box-lifting task `Isaac-H1-Table-Lift-v0`.
-
-In this task:
-*   The box spawns on a static **0.8m table** in front of the robot.
-*   The box features **side handles** (`y = +/-0.19` spacing).
-*   The robot must walk up to the table, align its arms, slide its wrists under the handles (form-closure), lift the box above the table top, and carry it forward.
-*   The lower body remains controlled by the frozen Stage-1 locomotion prior (Standard or AMP).
-
-### Train the Lift & Carry Policy:
+Start with the easier **hold** stage so the robot learns to support the box before walking.
 
 ```powershell
 Set-Location C:\Users\alexa\IsaacLab
-.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train.py --task Isaac-H1-Table-Lift-v0 --viz none --num_envs 64 --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train.py --task Isaac-H1-Carry-Box-Hold-v0 --viz none --num_envs 64 --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
+```
+
+## Stage 2B: train the carry-walk policy
+
+This trains the project task `Isaac-H1-Carry-Box-v0`.
+
+The high-level policy:
+
+- sees the carry-box state and locomotion command
+- outputs **3 locomotion commands** (`vx`, `vy`, `wz`) to the frozen lower-body policy
+- outputs **8 arm joint commands** for the H1 shoulders and elbows
+- gets extra observations for the box relative to the torso and the hands
+- is rewarded for keeping both hands near useful support points on the box
+
+Train with the exported locomotion policy:
+
+```powershell
+Set-Location C:\Users\alexa\IsaacLab
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train.py --viz none --num_envs 64 --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
 ```
 
 If you exported to the default path, the `--locomotion_policy` flag is optional:
 
 ```powershell
 Set-Location C:\Users\alexa\IsaacLab
-.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train.py --task Isaac-H1-Table-Lift-v0 --viz none --num_envs 64
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train.py --viz none --num_envs 64
 ```
 
-### Run Automated Reward Tuning (Eureka via local Ollama):
+Stage-2 checkpoints are written under:
 
-To automatically search for optimal reward weights (`robot_to_box_dist` and `box_lift`), ensure your local Ollama server is running and run:
+```text
+C:\Users\alexa\IsaacLab\logs\rsl_rl\h1_carry_box\
+```
+
+## Play / evaluate the hold policy
+
+Use this first to verify deterministic reset alignment and a stable support posture:
 
 ```powershell
 Set-Location C:\Users\alexa\IsaacLab
-.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\eureka_tuner.py --model llama3:8b --iterations 5 --train-steps 150
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\play.py --task Isaac-H1-Carry-Box-Hold-Play-v0 --num_envs 1 --real-time --visualizer kit --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
 ```
 
-### Play / Evaluate the Lift & Carry Policy:
+## Play / evaluate the carry policy
 
 ```powershell
 Set-Location C:\Users\alexa\IsaacLab
-.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\play.py --task Isaac-H1-Table-Lift-Play-v0 --num_envs 1 --real-time --visualizer kit --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\play.py --num_envs 4 --real-time --visualizer kit --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
 ```
 
 To load a specific carry checkpoint:
 
 ```powershell
 Set-Location C:\Users\alexa\IsaacLab
-.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\play.py --task Isaac-H1-Table-Lift-Play-v0 --num_envs 4 --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt --checkpoint C:\Users\alexa\IsaacLab\logs\rsl_rl\h1_carry_box\<run>\model_XXXX.pt
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\play.py --num_envs 4 --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt --checkpoint C:\Users\alexa\IsaacLab\logs\rsl_rl\h1_carry_box\<run>\model_XXXX.pt
 ```
 
 ## Task IDs
 
-*   **Stage 1 Locomotion:**
-    *   Standard: `Isaac-Velocity-Flat-H1-v0`
-    *   AMP-Regularized: `Isaac-Velocity-Flat-H1-AMP-v0`
-*   **Stage 2 Active Lift & Carry:**
-    *   Train: `Isaac-H1-Table-Lift-v0`
-    *   Play: `Isaac-H1-Table-Lift-Play-v0`
-*   **Stage 2 Hold / Bottom-Carry (Old):**
-    *   Hold Train: `Isaac-H1-Carry-Box-Hold-v0`
-    *   Carry Train: `Isaac-H1-Carry-Box-v0`
-
+- stage 2 hold train: `Isaac-H1-Carry-Box-Hold-v0`
+- stage 2 hold play: `Isaac-H1-Carry-Box-Hold-Play-v0`
+- stage 2 train: `Isaac-H1-Carry-Box-v0`
+- stage 2 play: `Isaac-H1-Carry-Box-Play-v0`
 
 ## What changed technically
 
@@ -180,9 +181,3 @@ The old standalone scene is still useful for simulator / asset sanity checks:
 Set-Location C:\Users\alexa\IsaacLab
 .\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\humanoid_carry_box.py --steps 240 --viz none
 ```
-
-## Future Work / TODOs
-
-- [ ] Integrate **Docker** support to containerize training and simplify headless sim setup in cloud environments.
-- [ ] Integrate **Weights & Biases (W&B)** for experiment tracking, hyperparameter sweeps, and training visualization.
-

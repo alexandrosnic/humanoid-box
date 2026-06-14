@@ -61,7 +61,7 @@ class FrozenLocomotionPolicyAction(ActionTerm):
                 self._low_level_full_actions[env.episode_length_buf == 0, :] = 0
             return self._low_level_full_actions
 
-        # Build original locomotion default joint positions (where arms default is 0.0)
+        # Build original locomotion default joint positions (matching original training defaults)
         loco_defaults = torch.zeros((env.num_envs, len(self._all_joint_ids)), device=env.device)
         for idx, name in enumerate(self._all_joint_names):
             if "hip_pitch" in name:
@@ -70,6 +70,10 @@ class FrozenLocomotionPolicyAction(ActionTerm):
                 loco_defaults[:, idx] = 0.79
             elif "ankle" in name:
                 loco_defaults[:, idx] = -0.52
+            elif "shoulder_pitch" in name:
+                loco_defaults[:, idx] = 0.28
+            elif "elbow" in name:
+                loco_defaults[:, idx] = 0.52
             else:
                 loco_defaults[:, idx] = 0.0
 
@@ -107,8 +111,8 @@ class FrozenLocomotionPolicyAction(ActionTerm):
 
     def process_actions(self, actions: torch.Tensor):
         # Scale actions from [-1, 1] to target locomotion velocity ranges
-        # vx: [-1, 1] -> [-0.05, 0.40] m/s (maps to actions[:, 0] * 0.225 + 0.175)
-        self._raw_actions[:, 0] = actions[:, 0] * 0.225 + 0.175
+        # Force vx to [0.15, 0.35] m/s to prevent the policy from standing still to exploit survival bias
+        self._raw_actions[:, 0] = actions[:, 0] * 0.10 + 0.25
         # vy: [-1, 1] -> [-0.10, 0.10] m/s
         self._raw_actions[:, 1] = actions[:, 1] * 0.10
         # wz: [-1, 1] -> [-0.25, 0.25] rad/s
