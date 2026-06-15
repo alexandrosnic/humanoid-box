@@ -11,6 +11,12 @@ This project now uses a **hierarchical / staged Isaac Lab workflow** designed fo
 
 That is much closer to Isaac Lab locomanipulation best practice than the previous single full-body PPO setup.
 
+## Policy Playback Demo
+
+Here is the 10-second playback video recorded from Isaac Sim on the `main` branch showing the trained carrying policy:
+
+<video src="artifacts/rl-video-step-0.mp4" controls width="100%"></video>
+
 ## Repository layout
 
 ```text
