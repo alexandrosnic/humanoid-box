@@ -47,10 +47,9 @@ The goal was to train the H1 humanoid robot to walk forward while stably carryin
 
 ### Result:
 
-<video controls>
-  <source src="https://github.com/user-attachments/assets/d8a7ec16-ecd5-496a-ac25-f886643a5e59" type="video/mp4">
-  <source src="artifacts/rl-video-step-0.mp4" type="video/mp4">
-</video>
+<video src="https://github.com/user-attachments/assets/d8a7ec16-ecd5-496a-ac25-f886643a5e59" controls></video>
+
+*(Local Preview in VS Code: [artifacts/rl-video-step-0.mp4](artifacts/rl-video-step-0.mp4))*
 
 ### Outcome
 I am not entirely satisfied with the result.
@@ -71,10 +70,9 @@ and because I was not satisfied neither with the walking outcome, nor with the t
 
 ### Result:
 
-<video controls>
-  <source src="https://github.com/user-attachments/assets/fd3b4ad8-6efd-4b7d-9177-31c9f3edcf46" type="video/mp4">
-  <source src="artifacts/rl-video-step-0-stage2.mp4" type="video/mp4">
-</video>
+<video src="https://github.com/user-attachments/assets/fd3b4ad8-6efd-4b7d-9177-31c9f3edcf46" controls></video>
+
+*(Local Preview in VS Code: [artifacts/rl-video-step-0-stage2.mp4](artifacts/rl-video-step-0-stage2.mp4))*
 
 ### Other options:
 - If I would do the training on an enterprise-level task, I would try to get access to GR00T foundational model to shortcut training and be more confident for the behavior.
