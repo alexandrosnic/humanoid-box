@@ -47,7 +47,7 @@ The goal was to train the H1 humanoid robot to walk forward while stably carryin
 
 ### Result:
 
-<video src="artifacts/rl-video-step-0.mp4" controls width="100%"></video>
+![Policy Playback Demo](artifacts/rl-video-step-0.mp4)
 
 ### Outcome
 I am not entirely satisfied with the result.
@@ -68,7 +68,7 @@ and because I was not satisfied neither with the walking outcome, nor with the t
 
 ### Result:
 
-<video src="artifacts/rl-video-step-0-stage2.mp4" controls width="100%"></video>
+![Stage 2 Policy Playback Demo](artifacts/rl-video-step-0-stage2.mp4)
 
 ### Other options:
 - If I would do the training on an enterprise-level task, I would try to get access to GR00T foundational model to shortcut training and be more confident for the behavior.

@@ -15,7 +15,7 @@ That is much closer to Isaac Lab locomanipulation best practice than the previou
 
 Here is the 10-second playback video recorded from Isaac Sim on the `main` branch showing the trained carrying policy:
 
-<video src="artifacts/rl-video-step-0.mp4" controls width="100%"></video>
+![Policy Playback Demo](artifacts/rl-video-step-0.mp4)
 
 ## Repository layout
 
@@ -181,7 +181,7 @@ Set-Location C:\Users\alexa\IsaacLab
 
 Here is the 10-second playback video recorded from Isaac Sim on the `main` branch showing the trained table-lifting and carrying policy:
 
-<video src="artifacts/rl-video-step-0-stage2.mp4" controls width="100%"></video>
+![Stage 2 Policy Playback Demo](artifacts/rl-video-step-0-stage2.mp4)
 
 ## Task IDs on this Branch
 
