@@ -227,7 +227,7 @@ def hands_under_box_tanh(
     return torch.exp(-total_above / std)
 
 
-def box_resting_on_arms_tanh(
+def box_resting_on_arms_with_handles_tanh(
     env: ManagerBasedRLEnv,
     std: float,
     object_cfg: SceneEntityCfg = SceneEntityCfg("carry_box"),
@@ -261,7 +261,7 @@ def box_resting_on_arms_tanh(
     return torch.exp(-total_error / std)
 
 
-def upright_posture_penalty(
+def upright_posture_pitch_penalty(
     env: ManagerBasedRLEnv,
     std: float = 0.15,
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),

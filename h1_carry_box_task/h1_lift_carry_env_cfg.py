@@ -187,7 +187,7 @@ class H1LiftCarryRewards(H1CarryBoxRewards):
         weight=0.0,
     )
     box_on_arms = RewTerm(
-        func=carry_rewards.box_resting_on_arms_tanh,
+        func=carry_rewards.box_resting_on_arms_with_handles_tanh,
         params={"std": 0.1},
         weight=0.0,
     )
