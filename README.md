@@ -93,26 +93,43 @@ By default this writes:
 C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
 ```
 
-## Stage 2A: train a stationary hold policy
+## First Stage of Learning: Mid-Air Carry (Legacy Task)
 
-Start with the easier **hold** stage so the robot learns to support the box before walking.
+This task trains the H1 humanoid robot to carry a heavy (5 kg) box that spawns in mid-air (at shoulder height) and walk forward.
 
+### Stage 2A: Train a Stationary Hold Policy
+Start with the easier **hold** stage so the robot learns to support the box before walking:
 ```powershell
 Set-Location C:\Users\alexa\IsaacLab
 .\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train.py --task Isaac-H1-Carry-Box-Hold-v0 --viz none --num_envs 64 --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
 ```
 
-## Stage 2B: train the carry-walk policy
+### Stage 2B: Train the Carry-Walk Policy
+This trains the walking carry policy (`Isaac-H1-Carry-Box-v0`). The high-level policy outputs offsets for the frozen locomotion policy and arm joint coordinates.
+```powershell
+Set-Location C:\Users\alexa\IsaacLab
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train.py --task Isaac-H1-Carry-Box-v0 --viz none --num_envs 64 --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
+```
 
-## Stage 2: Table Grasping, Lifting, and Carrying
+---
 
-This trains the active table-top box-lifting task `Isaac-H1-Table-Lift-v0` (which is registered as the default `TRAIN_TASK_ID` and `PLAY_TASK_ID` on this branch).
+## Second Stage of Learning: Table Grasping, Lifting, and Carrying (Improved Task)
+
+This task trains the active table-top box-lifting task `Isaac-H1-Table-Lift-v0` (which is registered as the default `TRAIN_TASK_ID` and `PLAY_TASK_ID`).
 
 In this task:
-- The box spawns on a static **0.8m table** in front of the robot.
+- The box spawns on a static **1.24m table** in front of the robot.
 - The box features **side handles** (`y = +/-0.19` spacing).
-- The robot must approach the table, slide its wrists under the handles, lift the box above the table top, and carry it forward (controlled by the Finite State Machine (FSM) command generator).
+- The robot must approach the table, slide its wrists under the handles, lift the box above the table top, and carry it away (controlled by the Finite State Machine (FSM) command generator).
 - The lower body remains controlled by the frozen Stage-1 locomotion prior (Standard or AMP).
+
+### Improvements & Changes Implemented:
+Based on the lessons from the first stage (where limited iterations on limited hardware caused gait instability and physical cheats), the following improvements were made:
+- **Locomotion Prior for Human Walking (AMP):** Added Adversarial Motion Priors (AMP) to guide the lower body. Feeding motion capture walk data (`humanoid_walk.npz`) helps the policy learn a clean walking gait instead of dragging its feet.
+- **LLM-in-the-loop Reward Generation (NVIDIA's Eureka):** Integrated a local Ollama feedback loop (`eureka_stage_tuner.py`) that tunes reward weights. It optimizes Phase 1 (approach and lift) first, locks the weights, and then resumes training automatically for Phase 2 (turn and carry), saving GPU training cycles.
+- **Finite State Machine (FSM):** Implemented an FSM inside the environment's command generator to smoothly orchestrate transition states: walk to the box, stand still to lift, turn 180 degrees, and carry walk away.
+- **Table-Body Collision Terminations:** To prevent the robot from leaning on the table (a common exploit), selective contact-sensor terminations are enabled on the pelvis, torso, hips, and knees. Touching the table with anything other than the arms/wrists triggers an instant reset.
+- **Refined Hand-to-Handle Proximity Rewards:** Replaced generic cradle rewards with precise wrist-to-handle distance tracking, penalizing the robot if its hands go above the handles. This forces the arms to slide strictly below the handles to lift.
 
 ### Step 1: Run a Visual Sanity Check (Play Mode)
 Before starting training, run the environment in play mode to verify the physical setup (table, box, robot spawn positions, and FSM approach commands):
