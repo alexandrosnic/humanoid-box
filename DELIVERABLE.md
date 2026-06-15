@@ -68,18 +68,20 @@ and because I was not satisfied neither with the walking outcome, nor with the t
 - **NVIDIA's Eureka as a feedback loop**: I ran a custom-stage Eureka locally using Ollama to search for reward weights. Essentially, it is an LLM-in-the-loop that trains - observes - evaluates performance (via LLM) - adjusts (rewards, observations etc) accordingly - retrains without breaking the loop, and until the final desired behavior is reached. The tuner automatically optimized Phase 1 (grasp/lift) from scratch, identified the best intermediate checkpoint in the log directory, and resumed training automatically for Phase 2 (turn/carry) with the Stage 1 weights locked, which saved precious training iterations.
 - **Integrate a FSM with a reward curriculum**: The robot must approach the box on the table, place the arms below the handles, lift it, and walk away from the table, via FSM inside the environment's command generator.
 
-### Result:
-
-<video src="https://github.com/user-attachments/assets/fd3b4ad8-6efd-4b7d-9177-31c9f3edcf46" controls></video>
-
-*(Local Preview in VS Code: [artifacts/rl-video-step-0-stage2.mp4](artifacts/rl-video-step-0-stage2.mp4))*
-
 ### Other options:
 - If I would do the training on an enterprise-level task, I would try to get access to GR00T foundational model to shortcut training and be more confident for the behavior.
 - Given sufficient fund, I could make use of specialized AI clouds such as: RunPod, Lambda Labs, CoreWeave etc, which are more cost efficient than running on hyperscalers (AWS, Azure, GCP), for hardware use.
 - The LLM could be replaced by a VLM in the loop.
 - I would like to replace the physics engine with the newly announced [NVIDIA Newton](https://developer.nvidia.com/newton-physics)
 
+### Result:
+
+<video src="https://github.com/user-attachments/assets/fd3b4ad8-6efd-4b7d-9177-31c9f3edcf46" controls></video>
+
+*(Local Preview in VS Code: [artifacts/rl-video-step-0-stage2.mp4](artifacts/rl-video-step-0-stage2.mp4))*
+
+### Outcome
+This part will be updated on the go.
 
 * Notes: RL is notorious at exploitting local optima / physics engines loopholes, which made the training loop slow.
 That was an example of the issues I faced and how I solved it:
