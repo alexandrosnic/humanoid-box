@@ -47,7 +47,10 @@ The goal was to train the H1 humanoid robot to walk forward while stably carryin
 
 ### Result:
 
-<video src="https://github.com/user-attachments/assets/d8a7ec16-ecd5-496a-ac25-f886643a5e59" controls></video>
+<video controls>
+  <source src="https://github.com/user-attachments/assets/d8a7ec16-ecd5-496a-ac25-f886643a5e59" type="video/mp4">
+  <source src="artifacts/rl-video-step-0.mp4" type="video/mp4">
+</video>
 
 ### Outcome
 I am not entirely satisfied with the result.
@@ -68,17 +71,19 @@ and because I was not satisfied neither with the walking outcome, nor with the t
 
 ### Result:
 
-<video src="https://github.com/user-attachments/assets/fd3b4ad8-6efd-4b7d-9177-31c9f3edcf46" controls></video>
+<video controls>
+  <source src="https://github.com/user-attachments/assets/fd3b4ad8-6efd-4b7d-9177-31c9f3edcf46" type="video/mp4">
+  <source src="artifacts/rl-video-step-0-stage2.mp4" type="video/mp4">
+</video>
 
 ### Other options:
 - If I would do the training on an enterprise-level task, I would try to get access to GR00T foundational model to shortcut training and be more confident for the behavior.
 - Given sufficient fund, I could make use of specialized AI clouds such as: RunPod, Lambda Labs, CoreWeave etc, which are more cost efficient than running on hyperscalers (AWS, Azure, GCP), for hardware use.
 - The LLM could be replaced by a VLM in the loop.
+- I would like to replace the physics engine with the newly announced [NVIDIA Newton](https://developer.nvidia.com/newton-physics)
+
 
 * Notes: RL is notorious at exploitting local optima / physics engines loopholes, which made the training loop slow.
 That was an example of the issues I faced and how I solved it:
 The robot learned that leaning on the table, standing, would accumulate reward over time. I resolved this by disabling body-contact tolerance and implementing selective contact-sensor terminations (pelvis, torso, hips, knees) so that any contact with the table other than the arms/wrists instantly reset the environment.
 
-
-Email:
-If you want to replicate the result I can provide a Docker file for easier setup.
