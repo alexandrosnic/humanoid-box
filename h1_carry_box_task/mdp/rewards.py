@@ -58,8 +58,9 @@ def box_upright_tanh(
     up_axis = torch.zeros((env.num_envs, 3), device=env.device, dtype=torch.float32)
     up_axis[:, 2] = 1.0
     world_up = quat_apply(carry_box.data.root_quat_w.torch, up_axis)
-    upright_error = 1.0 - world_up[:, 2].clamp(-1.0, 1.0)
-    return 1.0 - torch.tanh(upright_error / std)
+    # Use arccos to get the actual tilt angle in radians (linear gradient at zero tilt)
+    tilt_angle = torch.arccos(world_up[:, 2].clamp(-1.0 + 1e-6, 1.0 - 1e-6))
+    return 1.0 - torch.tanh(tilt_angle / std)
 
 
 def box_velocity_l2(
@@ -78,8 +79,18 @@ def hand_support_proximity_tanh(
     std: float,
     object_cfg: SceneEntityCfg = SceneEntityCfg("carry_box"),
 ) -> torch.Tensor:
+    """Reward hands for being close to the handles, penalizing them if they go above the handles."""
     support_error = carry_observations.hand_to_box_support_vector_in_robot_root_frame(env, side, object_cfg)
-    return 1.0 - torch.tanh(torch.linalg.norm(support_error, dim=1) / std)
+    
+    # 3D distance error
+    dist = torch.linalg.norm(support_error, dim=1)
+    
+    # Z component of support_error is (handle_z - hand_z).
+    # If hand_z > handle_z, then support_error[:, 2] is negative.
+    above_penalty = torch.clamp(-support_error[:, 2], min=0.0)
+    
+    total_error = dist + 4.0 * above_penalty
+    return 1.0 - torch.tanh(total_error / std)
 
 
 def box_centered_between_hands_tanh(
@@ -221,26 +232,172 @@ def box_resting_on_arms_tanh(
     std: float,
     object_cfg: SceneEntityCfg = SceneEntityCfg("carry_box"),
 ) -> torch.Tensor:
-    """Reward the box for resting on top of the arms (cradle position).
-
-    The box should be above the hand midpoint and centered between the hands.
+    """Reward the box handles for resting on top of the wrists/forearms.
+    
+    This penalizes the robot if its hands go above the handles, and rewards
+    holding the handles from directly below.
     """
-    left_hand_pos_b = carry_observations.hand_position_in_robot_root_frame(env, side="left")
-    right_hand_pos_b = carry_observations.hand_position_in_robot_root_frame(env, side="right")
-    box_pos_b = carry_observations.box_position_in_robot_root_frame(env, object_cfg=object_cfg)
+    # Get support vectors in robot root frame (handle_pos - hand_pos)
+    left_vec = carry_observations.hand_to_box_support_vector_in_robot_root_frame(env, "left", object_cfg)
+    right_vec = carry_observations.hand_to_box_support_vector_in_robot_root_frame(env, "right", object_cfg)
+    
+    # Horizontal error (XY deviation)
+    left_xy_err = torch.linalg.norm(left_vec[:, :2], dim=1)
+    right_xy_err = torch.linalg.norm(right_vec[:, :2], dim=1)
+    
+    # Z differences (positive = hand is below handle)
+    left_z_diff = left_vec[:, 2]
+    right_z_diff = right_vec[:, 2]
+    
+    # Penalize hands that go above the handles (negative diff)
+    left_above = torch.clamp(-left_z_diff, min=0.0)
+    right_above = torch.clamp(-right_z_diff, min=0.0)
+    
+    # Target vertical support offset (e.g. 2cm below handle)
+    left_z_err = torch.abs(left_z_diff - 0.02)
+    right_z_err = torch.abs(right_z_diff - 0.02)
+    
+    total_error = left_xy_err + right_xy_err + left_z_err + right_z_err + 5.0 * (left_above + right_above)
+    return torch.exp(-total_error / std)
 
-    # Hand midpoint
-    hand_midpoint_b = 0.5 * (left_hand_pos_b + right_hand_pos_b)
 
-    # Box should be above the hand midpoint (positive z difference)
-    z_above = box_pos_b[:, 2] - hand_midpoint_b[:, 2]
-    z_above = torch.clamp(z_above, min=0.0)  # Only reward when box is above
+def upright_posture_penalty(
+    env: ManagerBasedRLEnv,
+    std: float = 0.15,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize the robot torso from leaning forward (pitch) to maintain balance."""
+    robot = env.scene[robot_cfg.name]
+    root_quat = robot.data.root_quat_w.torch
+    from isaaclab.utils.math import yaw_pitch_roll_from_quat
+    _, pitch, _ = yaw_pitch_roll_from_quat(root_quat)
+    forward_lean = torch.clamp(pitch, min=0.0)  # Only penalize forward lean
+    return torch.exp(-forward_lean / std)
 
-    # Box should be centered between hands in y
-    y_error = torch.abs(box_pos_b[:, 1] - hand_midpoint_b[:, 1])
 
-    # Combined error: box should be above AND centered
-    error = y_error - 0.5 * z_above  # Reward z_above, penalize y_error
-    error = torch.clamp(error, min=0.0)
+def robot_to_box_distance_target_tanh(
+    env: ManagerBasedRLEnv,
+    target_dist: float,
+    std: float,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("carry_box"),
+) -> torch.Tensor:
+    robot: RigidObject = env.scene[robot_cfg.name]
+    carry_box: RigidObject = env.scene[object_cfg.name]
+    dist = torch.linalg.norm(robot.data.root_pos_w.torch[:, :2] - carry_box.data.root_pos_w.torch[:, :2], dim=1)
+    error = torch.abs(dist - target_dist)
+    return 1.0 - torch.tanh(error / std)
 
-    return torch.exp(-error / std)
+
+def box_lift_above_table_tanh(
+    env: ManagerBasedRLEnv,
+    table_height: float,
+    std: float,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("carry_box"),
+) -> torch.Tensor:
+    carry_box: RigidObject = env.scene[object_cfg.name]
+    box_z = carry_box.data.root_pos_w.torch[:, 2]
+    lift_height = torch.clamp(box_z - table_height, min=0.0)
+    return torch.tanh(lift_height / std)
+
+
+def track_gait_mocap(
+    env: ManagerBasedRLEnv,
+    std: float,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    import numpy as np
+    robot = env.scene[robot_cfg.name]
+    
+    # Initialize the mocap cache on the environment if not present
+    if not hasattr(env, "_mocap_cache"):
+        mocap_path = r"C:\Users\alexa\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\motions\humanoid_walk.npz"
+        mocap_data = np.load(mocap_path)
+        ref_dof_names = list(mocap_data["dof_names"])
+        ref_dof_positions = torch.tensor(mocap_data["dof_positions"], device=env.device, dtype=torch.float32)
+        
+        # Build index mapping for robot's joint order
+        robot_joint_names = robot.data.joint_names
+        
+        H1_TO_REF_MAP = {
+            "left_hip_yaw": "left_hip_z",
+            "left_hip_roll": "left_hip_x",
+            "left_hip_pitch": "left_hip_y",
+            "left_knee": "left_knee",
+            "left_ankle": "left_ankle_y",
+            "right_hip_yaw": "right_hip_z",
+            "right_hip_roll": "right_hip_x",
+            "right_hip_pitch": "right_hip_y",
+            "right_knee": "right_knee",
+            "right_ankle": "right_ankle_y",
+            "torso": "abdomen_z",
+            "left_shoulder_pitch": "left_shoulder_y",
+            "left_shoulder_roll": "left_shoulder_x",
+            "left_shoulder_yaw": "left_shoulder_z",
+            "left_elbow": "left_elbow",
+            "right_shoulder_pitch": "right_shoulder_y",
+            "right_shoulder_roll": "right_shoulder_x",
+            "right_shoulder_yaw": "right_shoulder_z",
+            "right_elbow": "right_elbow",
+        }
+        
+        # Create mapping indices
+        mapping_indices = []
+        ref_indices = []
+        
+        for robot_idx, name in enumerate(robot_joint_names):
+            matched = False
+            for h1_key, ref_key in H1_TO_REF_MAP.items():
+                if h1_key in name:
+                    if ref_key in ref_dof_names:
+                        mapping_indices.append(robot_idx)
+                        ref_indices.append(ref_dof_names.index(ref_key))
+                        matched = True
+                        break
+            
+        env._mocap_cache = {
+            "robot_indices": torch.tensor(mapping_indices, device=env.device),
+            "ref_indices": torch.tensor(ref_indices, device=env.device),
+            "ref_positions": ref_dof_positions,
+            "fps": float(mocap_data["fps"]),
+            "num_frames": ref_dof_positions.shape[0]
+        }
+    
+    cache = env._mocap_cache
+    
+    # Calculate current frame index for each environment
+    fps = cache["fps"]
+    num_frames = cache["num_frames"]
+    time_elapsed = env.episode_length_buf.float() * env.dt
+    frame_indices = (time_elapsed * fps).long() % num_frames
+    
+    # Get reference joint positions
+    ref_pos_mapped = cache["ref_positions"][frame_indices][:, cache["ref_indices"]]
+    
+    # Get robot's current joint positions (rel)
+    robot_pos_mapped = robot.data.joint_pos[:, cache["robot_indices"]]
+    
+    # Compute squared error
+    pos_error = torch.sum(torch.square(robot_pos_mapped - ref_pos_mapped), dim=1)
+    return torch.exp(-pos_error / std)
+
+
+def box_moving_away_from_table(
+    env: ManagerBasedRLEnv,
+    table_pos: tuple[float, float],
+    std: float = 1.0,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("carry_box"),
+) -> torch.Tensor:
+    carry_box = env.scene[object_cfg.name]
+    origins = env.scene.env_origins[:, :2]
+    
+    # Absolute table position in world coordinates for each environment
+    table_offset = torch.tensor(table_pos, device=env.device, dtype=torch.float32).unsqueeze(0)
+    table_pos_w = origins + table_offset
+    
+    # Distance in XY plane between box and table center
+    dist = torch.linalg.norm(carry_box.data.root_pos_w.torch[:, :2] - table_pos_w, dim=1)
+    
+    # Reward distance from table, clamping at 2.0 meters to prevent unbounded rewards
+    return torch.clamp(dist, max=2.0)
+
