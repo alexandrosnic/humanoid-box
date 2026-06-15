@@ -66,6 +66,9 @@ and because I was not satisfied neither with the walking outcome, nor with the t
 - **NVIDIA's Eureka as a feedback loop**: I ran a custom-stage Eureka locally using Ollama to search for reward weights. Essentially, it is an LLM-in-the-loop that trains - observes - evaluates performance (via LLM) - adjusts (rewards, observations etc) accordingly - retrains without breaking the loop, and until the final desired behavior is reached. The tuner automatically optimized Phase 1 (grasp/lift) from scratch, identified the best intermediate checkpoint in the log directory, and resumed training automatically for Phase 2 (turn/carry) with the Stage 1 weights locked, which saved precious training iterations.
 - **Integrate a FSM with a reward curriculum**: The robot must approach the box on the table, place the arms below the handles, lift it, and walk away from the table, via FSM inside the environment's command generator.
 
+### Result:
+
+<video src="artifacts/rl-video-step-0-stage2.mp4" controls width="100%"></video>
 
 ### Other options:
 - If I would do the training on an enterprise-level task, I would try to get access to GR00T foundational model to shortcut training and be more confident for the behavior.

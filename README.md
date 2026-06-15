@@ -177,6 +177,12 @@ Set-Location C:\Users\alexa\IsaacLab
 .\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\play.py --num_envs 4 --real-time --visualizer kit --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt --checkpoint C:\Users\alexa\IsaacLab\logs\rsl_rl\h1_carry_box\<run_folder>\model_XXXX.pt
 ```
 
+#### Stage 2 Policy Playback Demo
+
+Here is the 10-second playback video recorded from Isaac Sim on the `main` branch showing the trained table-lifting and carrying policy:
+
+<video src="artifacts/rl-video-step-0-stage2.mp4" controls width="100%"></video>
+
 ## Task IDs on this Branch
 
 - Stage 2 Default Train: `Isaac-H1-Table-Lift-v0`
