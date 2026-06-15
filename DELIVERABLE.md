@@ -56,7 +56,7 @@ But I must also admit that my limited hardware (RTX 4060, 8GB VRAM, 32GB RAM) di
 
 This training loop got me only that far, given the trade-off of letting the humanoid get sufficient number of training loops to learn the desired outcome, but also iterate fast for fast prototyping (reaching the desired outcome fast).
 
-## 2nd task: Lift the box from a table, and walk away
+## 2nd task: Lift the box from a table, and walk away (branch:feature/box-lifting-grasping)
 
 ### Improvements
 When I finished the first step of the learning path:
