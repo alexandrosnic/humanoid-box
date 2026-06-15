@@ -104,65 +104,69 @@ Set-Location C:\Users\alexa\IsaacLab
 
 ## Stage 2B: train the carry-walk policy
 
-This trains the project task `Isaac-H1-Carry-Box-v0`.
+## Stage 2: Table Grasping, Lifting, and Carrying
 
-The high-level policy:
+This trains the active table-top box-lifting task `Isaac-H1-Table-Lift-v0` (which is registered as the default `TRAIN_TASK_ID` and `PLAY_TASK_ID` on this branch).
 
-- sees the carry-box state and locomotion command
-- outputs **3 locomotion commands** (`vx`, `vy`, `wz`) to the frozen lower-body policy
-- outputs **8 arm joint commands** for the H1 shoulders and elbows
-- gets extra observations for the box relative to the torso and the hands
-- is rewarded for keeping both hands near useful support points on the box
+In this task:
+- The box spawns on a static **0.8m table** in front of the robot.
+- The box features **side handles** (`y = +/-0.19` spacing).
+- The robot must approach the table, slide its wrists under the handles, lift the box above the table top, and carry it forward (controlled by the Finite State Machine (FSM) command generator).
+- The lower body remains controlled by the frozen Stage-1 locomotion prior (Standard or AMP).
 
-Train with the exported locomotion policy:
-
-```powershell
-Set-Location C:\Users\alexa\IsaacLab
-.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train.py --viz none --num_envs 64 --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
-```
-
-If you exported to the default path, the `--locomotion_policy` flag is optional:
+### Step 1: Run a Visual Sanity Check (Play Mode)
+Before starting training, run the environment in play mode to verify the physical setup (table, box, robot spawn positions, and FSM approach commands):
 
 ```powershell
 Set-Location C:\Users\alexa\IsaacLab
-.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train.py --viz none --num_envs 64
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\play.py --num_envs 1 --real-time --visualizer kit --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
 ```
 
-Stage-2 checkpoints are written under:
-
-```text
-C:\Users\alexa\IsaacLab\logs\rsl_rl\h1_carry_box\
-```
-
-## Play / evaluate the hold policy
-
-Use this first to verify deterministic reset alignment and a stable support posture:
+### Step 2: Train the Lift & Carry Policy
+To train the Stage-2 policy headless (fastest, fits in VRAM on RTX 4060):
 
 ```powershell
 Set-Location C:\Users\alexa\IsaacLab
-.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\play.py --task Isaac-H1-Carry-Box-Hold-Play-v0 --num_envs 1 --real-time --visualizer kit --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\train.py --viz none --num_envs 128 --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
 ```
 
-## Play / evaluate the carry policy
+### Step 3: Run Automated Reward Tuning (Eureka via local Ollama)
+
+You have two options for automated reward tuning depending on your sample-efficiency preference:
+
+#### Option A: Sequential Stage-wise Tuning (Recommended)
+This optimizes the rewards in two phases:
+1. **Phase 1 (Grasp & Lift):** Tunes weights for table approach and box lifting from scratch, keeping carry weights at 0.0.
+2. **Phase 2 (Turn & Carry):** Automatically resumes training from the best Phase 1 checkpoint and tunes the carry weight.
 
 ```powershell
 Set-Location C:\Users\alexa\IsaacLab
-.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\play.py --num_envs 4 --real-time --visualizer kit --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\eureka_stage_tuner.py --model qwen3-coder:latest --stage1-iterations 4 --stage1-steps 150 --stage2-iterations 4 --stage2-steps 300 --num-envs 64
 ```
 
-To load a specific carry checkpoint:
+#### Option B: Single-stage Tuning (Legacy)
+Tunes all weights at the same time from scratch:
 
 ```powershell
 Set-Location C:\Users\alexa\IsaacLab
-.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\play.py --num_envs 4 --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt --checkpoint C:\Users\alexa\IsaacLab\logs\rsl_rl\h1_carry_box\<run>\model_XXXX.pt
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\eureka_tuner.py --model qwen3-coder:latest --iterations 5 --train-steps 150 --num-envs 64
 ```
 
-## Task IDs
+### Step 4: Evaluate the Trained Checkpoint (Play Mode)
+Once training is complete, visually evaluate the robot's performance by loading the learned checkpoint:
 
-- stage 2 hold train: `Isaac-H1-Carry-Box-Hold-v0`
-- stage 2 hold play: `Isaac-H1-Carry-Box-Hold-Play-v0`
-- stage 2 train: `Isaac-H1-Carry-Box-v0`
-- stage 2 play: `Isaac-H1-Carry-Box-Play-v0`
+```powershell
+Set-Location C:\Users\alexa\IsaacLab
+.\isaaclab.bat -p C:\Users\alexa\projects\humanoid_training\scripts\play.py --num_envs 4 --real-time --visualizer kit --locomotion_policy C:\Users\alexa\projects\humanoid_training\artifacts\h1_flat_policy.pt --checkpoint C:\Users\alexa\IsaacLab\logs\rsl_rl\h1_carry_box\<run_folder>\model_XXXX.pt
+```
+
+## Task IDs on this Branch
+
+- Stage 2 Default Train: `Isaac-H1-Table-Lift-v0`
+- Stage 2 Default Play: `Isaac-H1-Table-Lift-Play-v0`
+- Stage 1 AMP Locomotion: `Isaac-Velocity-Flat-H1-AMP-v0`
+- Legacy Mid-Air Carry Train: `Isaac-H1-Carry-Box-v0`
+- Legacy Mid-Air Carry Play: `Isaac-H1-Carry-Box-Play-v0`
 
 ## What changed technically
 
