@@ -81,7 +81,8 @@ and because I was not satisfied neither with the walking outcome, nor with the t
 *(Local Preview in VS Code: [artifacts/rl-video-step-0-stage2.mp4](artifacts/rl-video-step-0-stage2.mp4))*
 
 ### Outcome
-This part will be updated on the go.
+The robot did not learn the correct behavior yet, due to local optima at some point fo the FSM. This part will be updated on the go. Currently, the 1st task (1st phase of the training) holds the best attempt to the solution.
+
 
 * Notes: RL is notorious at exploitting local optima / physics engines loopholes, which made the training loop slow.
 That was an example of the issues I faced and how I solved it:
