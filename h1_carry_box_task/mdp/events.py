@@ -31,19 +31,40 @@ def reset_robot_root_for_carry(
     pose_range: dict[str, tuple[float, float]],
     velocity_range: dict[str, tuple[float, float]],
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    extreme_reset_prob: float = 0.0,
 ):
     robot: Articulation = env.scene[asset_cfg.name]
     default_root_pose = robot.data.default_root_pose.torch[env_ids].clone()
     default_root_vel = robot.data.default_root_vel.torch[env_ids].clone()
 
     pose_samples = _sample_range_tensor(env, env_ids, pose_range)
+    velocity_samples = _sample_range_tensor(env, env_ids, velocity_range)
+
+    # Apply severe pitch/roll tilts to a subset of environments (extreme resets)
+    if extreme_reset_prob > 0.0:
+        extreme_mask = torch.rand(len(env_ids), device=env.device) < extreme_reset_prob
+        if extreme_mask.any():
+            extreme_ids = env_ids[extreme_mask]
+            num_extreme = len(extreme_ids)
+            
+            # Random pitch/roll in [-0.15, 0.15] radians (~ +/- 8.6 degrees)
+            extreme_pitch = (torch.rand(num_extreme, device=env.device) * 2.0 - 1.0) * 0.15
+            extreme_roll = (torch.rand(num_extreme, device=env.device) * 2.0 - 1.0) * 0.10
+            
+            # Map back to pose_samples for these specific indices (index 3 = roll, index 4 = pitch)
+            idx_in_batch = torch.where(extreme_mask)[0]
+            pose_samples[idx_in_batch, 3] += extreme_roll
+            pose_samples[idx_in_batch, 4] += extreme_pitch
+            
+            # Add some linear/angular velocity disturbance
+            velocity_samples[idx_in_batch, 0] += (torch.rand(num_extreme, device=env.device) * 2.0 - 1.0) * 0.15 # vx
+            velocity_samples[idx_in_batch, 4] += (torch.rand(num_extreme, device=env.device) * 2.0 - 1.0) * 0.20 # pitch rate
+
     positions = default_root_pose[:, :3] + env.scene.env_origins[env_ids] + pose_samples[:, :3]
     orientation_delta = math_utils.quat_from_euler_xyz(
         pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
     )
     orientations = math_utils.quat_mul(default_root_pose[:, 3:7], orientation_delta)
-
-    velocity_samples = _sample_range_tensor(env, env_ids, velocity_range)
     velocities = default_root_vel + velocity_samples
 
     root_pose = torch.cat([positions, orientations], dim=-1)
@@ -111,11 +132,34 @@ def reset_box_on_table(
     velocity_range: dict[str, tuple[float, float]],
     asset_cfg: SceneEntityCfg = SceneEntityCfg("carry_box"),
     table_pos: tuple[float, float, float] = (0.55, 0.0, 0.89),
+    extreme_reset_prob: float = 0.0,
 ):
     carry_box: RigidObject = env.scene[asset_cfg.name]
     origins = env.scene.env_origins[env_ids]
 
     pose_samples = _sample_range_tensor(env, env_ids, pose_range)
+
+    # Apply severe box offset and tilts to a subset of environments (extreme resets)
+    if extreme_reset_prob > 0.0:
+        extreme_mask = torch.rand(len(env_ids), device=env.device) < extreme_reset_prob
+        if extreme_mask.any():
+            extreme_ids = env_ids[extreme_mask]
+            num_extreme = len(extreme_ids)
+            idx_in_batch = torch.where(extreme_mask)[0]
+            
+            # Off-center y shift (left/right) up to +/- 0.10m
+            extreme_y = (torch.rand(num_extreme, device=env.device) * 2.0 - 1.0) * 0.10
+            # Offset x shift (closer/further) up to +/- 0.05m
+            extreme_x = (torch.rand(num_extreme, device=env.device) * 2.0 - 1.0) * 0.05
+            # Tilt box up to +/- 15 degrees (0.26 rad)
+            extreme_pitch = (torch.rand(num_extreme, device=env.device) * 2.0 - 1.0) * 0.26
+            extreme_roll = (torch.rand(num_extreme, device=env.device) * 2.0 - 1.0) * 0.26
+            
+            pose_samples[idx_in_batch, 0] += extreme_x
+            pose_samples[idx_in_batch, 1] += extreme_y
+            pose_samples[idx_in_batch, 3] += extreme_roll
+            pose_samples[idx_in_batch, 4] += extreme_pitch
+
     box_offset = torch.tensor(table_pos, device=carry_box.device, dtype=torch.float32).unsqueeze(0).repeat(
         len(env_ids), 1
     )

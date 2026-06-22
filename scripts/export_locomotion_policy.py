@@ -11,6 +11,9 @@ from isaaclab.app import AppLauncher
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+import h1_carry_box_task  # noqa: F401
+
 ISAACLAB_ROOT = Path(r"C:\Users\alexa\IsaacLab")
 DEFAULT_TASK = "Isaac-Velocity-Flat-H1-v0"
 DEFAULT_OUTPUT = PROJECT_ROOT / "artifacts" / "h1_flat_policy.pt"

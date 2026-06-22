@@ -389,7 +389,7 @@ class H1CarryBoxTerminationsCfg(VelocityTerminationsCfg):
 class H1CarryBoxCurriculumCfg(VelocityCurriculumCfg):
     box_lift = CurrTerm(
         func=carry_curriculums.ramp_reward_weight,
-        params={"term_name": "box_lift", "start_step": 3000, "end_step": 6000, "target_weight": 0.5},
+        params={"term_name": "box_lift", "start_step": 3000, "end_step": 6000, "target_weight": 8.0},
     )
     box_carry_velocity = CurrTerm(
         func=carry_curriculums.ramp_reward_weight,
@@ -437,9 +437,9 @@ class H1CarryBoxEnvCfg(H1FlatEnvCfg):
     # Target positions (in robot base frame)
     # Box moved closer (0.25m) and lower (0.32m) to rest on forearms
     carry_box_target_pos_b = (0.25, 0.0, 0.32)
-    # Hand offsets match new inward box spacing (0.292m in y-direction)
-    carry_box_left_hand_target_offset_b = (0.0, 0.146, 0.0)
-    carry_box_right_hand_target_offset_b = (0.0, -0.146, 0.0)
+    # Hand offsets adjusted to target a position below the handles
+    carry_box_left_hand_target_offset_b = (0.0, 0.146, -0.4)
+    carry_box_right_hand_target_offset_b = (0.0, -0.146, -0.4)
     carry_box_torso_target_pos_t = (0.2, 0.0, -0.1)
 
     def __post_init__(self):

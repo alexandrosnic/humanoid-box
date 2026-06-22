@@ -17,7 +17,9 @@ from isaaclab.utils.configclass import configclass
 from .h1_carry_box_env_cfg import H1CarryBoxEnvCfg, H1CarryBoxSceneCfg, H1CarryBoxRewards, H1CarryBoxEventsCfg, H1CarryBoxTerminationsCfg, H1CarryBoxCurriculumCfg
 from .mdp import rewards as carry_rewards
 from .mdp import events as carry_events
+from .mdp import terminations as carry_terminations
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import mdp as locomotion_mdp
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -154,30 +156,55 @@ class H1LiftCarryRewards(H1CarryBoxRewards):
     
     # Override box_lift to reward raising the box above table height (0.8m)
     box_lift = RewTerm(
-        func=carry_rewards.box_lift_above_table_tanh,
+        func=carry_rewards.box_lift_above_table_gated,
         params={"table_height": 1.24, "std": 0.15},
         weight=5.0000,  # Ramped via curriculum
     )
 
-    # Reward for carrying the box away from the table
+    # Reward for carrying the box away from the table (gated by handle grasp)
     box_carry_away = RewTerm(
-        func=carry_rewards.box_moving_away_from_table,
+        func=carry_rewards.box_moving_away_from_table_gated,
         params={"table_pos": (0.55, 0.0), "std": 1.0},
-        weight=3.0000,  # Ramped via curriculum
+        weight=0.0,  # Ramped via curriculum
     )
 
-    # Reward left hand for being close to the left handle target offset
+    # Reward left hand for being close to the left handle target offset.
+    # std=0.25: broad enough to provide gradient even when elbow starts 0.43m from handle.
+    # above_penalty removed: the coefficient 15.0 was killing all reward signal before
+    # the arm could learn to reach forward (any tiny z>target gave tanh->1 -> reward=0).
     left_hand_to_handle = RewTerm(
-        func=carry_rewards.hand_support_proximity_tanh,
-        params={"side": "left", "std": 0.15},
+        func=carry_rewards.hand_support_proximity_exp,
+        params={"side": "left", "std": 0.25},
         weight=3.0000,
     )
     
-    # Reward right hand for being close to the right handle target offset
+    # Reward right hand for being close to the right handle target offset.
     right_hand_to_handle = RewTerm(
-        func=carry_rewards.hand_support_proximity_tanh,
-        params={"side": "right", "std": 0.15},
+        func=carry_rewards.hand_support_proximity_exp,
+        params={"side": "right", "std": 0.25},
         weight=3.0000,
+    )
+
+    # Penalize if either foot leaves the ground (discourages one-leg balancing exploit)
+    # Weight must be large enough to compete with hand proximity rewards (~6.0 max).
+    # Force threshold lowered to 1.0N so it fires reliably even during quiet standing.
+    both_feet_grounded = RewTerm(
+        func=carry_rewards.both_feet_grounded_penalty,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_link"),
+            "min_contact_force": 1.0,
+        },
+        weight=0.0,
+    )
+
+    # Penalize non-zero locomotion actions before the box is lifted.
+    # Root cause fix: the high-level policy learns to output non-zero velocity commands
+    # to make the low-level locomotion policy raise a leg and shift weight forward.
+    # This penalty removes the incentive by directly penalising locomotion action magnitude.
+    pre_lift_locomotion = RewTerm(
+        func=carry_rewards.pre_lift_locomotion_penalty,
+        params={},
+        weight=0.0,
     )
 
     # Disable legacy bottom-carry grasp rewards to focus 100% on the handles
@@ -191,11 +218,67 @@ class H1LiftCarryRewards(H1CarryBoxRewards):
         params={"std": 0.1},
         weight=0.0,
     )
+    
+    # Disable hands_in_front as it is no longer needed for handles
+    hands_in_front = RewTerm(
+        func=carry_rewards.hands_in_front_of_robot,
+        params={"std": 0.2},
+        weight=0.0,
+    )
+
+    # Override box_still_during_grasp to only penalize z-velocity and only while on table
+    box_still_during_grasp = RewTerm(
+        func=carry_rewards.box_z_velocity_on_table_l2,
+        weight=-0.02,
+    )
+
+    # Penalize hand height asymmetry (Z-axis difference) directly
+    hand_height_asymmetry = RewTerm(
+        func=carry_rewards.hand_height_asymmetry_penalty,
+        weight=0.0,
+    )
+
+    # Gated locomotion velocity rewards (only active if holding both handles)
+    track_lin_vel_xy_exp = RewTerm(
+        func=carry_rewards.track_lin_vel_xy_exp_gated,
+        params={"std": 0.5, "command_name": "base_velocity"},
+        weight=0.0,  # Ramped via curriculum
+    )
+    track_ang_vel_z_exp = RewTerm(
+        func=carry_rewards.track_ang_vel_z_exp_gated,
+        params={"std": 0.5, "command_name": "base_velocity"},
+        weight=0.0,  # Ramped via curriculum
+    )
+
+    # feet_air_time is disabled via post_init below
 
 
 @configclass
 class H1LiftCarryEventsCfg(H1CarryBoxEventsCfg):
-    # Override box reset to place it on the table
+    # Override robot reset to introduce counterfactual body tilts (extreme resets)
+    reset_base = EventTerm(
+        func=carry_events.reset_robot_root_for_carry,
+        mode="reset",
+        params={
+            "pose_range": {
+                "x": (-0.05, 0.05),
+                "y": (-0.03, 0.03),
+                "z": (-0.01, 0.01),
+                "yaw": (-0.15, 0.15),
+            },
+            "velocity_range": {
+                "x": (-0.05, 0.05),
+                "y": (-0.05, 0.05),
+                "z": (-0.02, 0.02),
+                "roll": (-0.05, 0.05),
+                "pitch": (-0.05, 0.05),
+                "yaw": (-0.1, 0.1),
+            },
+            "extreme_reset_prob": 0.2,  # 20% chance of severe body tilts
+        },
+    )
+
+    # Override box reset to place it on the table with off-center offsets (extreme resets)
     reset_carry_box = EventTerm(
         func=carry_events.reset_box_on_table,
         mode="reset",
@@ -218,6 +301,7 @@ class H1LiftCarryEventsCfg(H1CarryBoxEventsCfg):
                 "pitch": (0.0, 0.0),
                 "yaw": (0.0, 0.0),
             },
+            "extreme_reset_prob": 0.2,  # 20% chance of severe box offsets/tilts on table
         },
     )
 
@@ -229,48 +313,68 @@ class H1LiftCarryTerminationsCfg(H1CarryBoxTerminationsCfg):
         func=locomotion_mdp.root_height_below_minimum,
         params={"minimum_height": 1.05, "asset_cfg": SceneEntityCfg("carry_box")},
     )
-    # Terminate early if the robot's pelvis falls below 0.92m (robot fell down)
+    # Terminate early if the robot's pelvis falls below 0.65m (robot fell down)
     robot_fallen = DoneTerm(
         func=locomotion_mdp.root_height_below_minimum,
-        params={"minimum_height": 0.92, "asset_cfg": SceneEntityCfg("robot")},
+        params={"minimum_height": 0.65, "asset_cfg": SceneEntityCfg("robot")},
     )
     # Terminate early if the robot tilts/leans too far forward or backward (exploit prevention)
     robot_bad_orientation = DoneTerm(
         func=locomotion_mdp.bad_orientation,
         params={"limit_angle": 0.52, "asset_cfg": SceneEntityCfg("robot")},
     )
-    # Terminate early if the robot's torso, pelvis, or legs collide with/lean on the table
+    # Terminate if the robot's torso leans on the table (cheating exploit).
+    # Knees and hips are intentionally excluded — they are naturally close to the table
+    # when standing at lifting distance and should not trigger a reset.
     robot_body_table_contact = DoneTerm(
         func=locomotion_mdp.illegal_contact,
         params={
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces",
                 body_names=[
-                    "pelvis",
                     "torso_link",
-                    "left_hip_pitch_link",
-                    "right_hip_pitch_link",
-                    "left_knee_link",
-                    "right_knee_link",
                 ],
             ),
             "threshold": 1.0,
         },
     )
+    # Terminate early if the robot fails to lift the box within 5.0 seconds (250 steps)
+    box_not_lifted_timeout = DoneTerm(
+        func=carry_terminations.box_not_lifted_timeout,
+        params={"timeout_time": 5.0, "minimum_height": 1.26},
+    )
+    
+    # Terminate early if either hand/elbow drops below table height (1.15m) to prevent table leaning
+    arms_below_table = DoneTerm(
+        func=carry_terminations.arms_below_table_limit,
+        params={"min_height": 1.16, "start_step": 15},
+    )
 
 
 @configclass
 class H1LiftCarryCurriculumCfg(H1CarryBoxCurriculumCfg):
-    # Override parent curriculum to target the optimized weight of 2.5
+    # Ramp up the box lift reward to 5.0 over 2,000 steps (83 iterations)
     box_lift = CurrTerm(
         func=locomotion_mdp.modify_reward_weight,
-        params={"term_name": "box_lift", "weight": 5.0000, "num_steps": 30000},
+        params={"term_name": "box_lift", "weight": 5.0000, "num_steps": 2000},
     )
-    # Add curriculum to introduce carry-away rewards after lift has been stabilized, targeting 2.0
+    # Ramp up the gated carry-away reward to 3.0 over 2,000 steps
     box_carry_away = CurrTerm(
         func=locomotion_mdp.modify_reward_weight,
-        params={"term_name": "box_carry_away", "weight": 3.0000, "num_steps": 5000},
+        params={"term_name": "box_carry_away", "weight": 3.0000, "num_steps": 2000},
     )
+    # Ramp up the gated forward walking velocity reward to 2.5 over 2,000 steps
+    track_lin_vel_xy = CurrTerm(
+        func=locomotion_mdp.modify_reward_weight,
+        params={"term_name": "track_lin_vel_xy_exp", "weight": 2.5, "num_steps": 2000},
+    )
+    # Ramp up the gated angular yaw velocity reward to 0.75 over 2,000 steps
+    track_ang_vel_z = CurrTerm(
+        func=locomotion_mdp.modify_reward_weight,
+        params={"term_name": "track_ang_vel_z_exp", "weight": 0.75, "num_steps": 2000},
+    )
+    # Disable feet_air_time curriculum
+    feet_air_time = None
 
 
 @configclass
@@ -281,8 +385,9 @@ class H1LiftCarryEnvCfg(H1CarryBoxEnvCfg):
     events: H1LiftCarryEventsCfg = H1LiftCarryEventsCfg()
     curriculum: H1LiftCarryCurriculumCfg = H1LiftCarryCurriculumCfg()
 
-    # The box handles are at y = +/-0.19. We set the target hand support points 
-    # to be 4cm below the handles to encourage sliding under them.
+    # The box handles are at y = +/-0.19m on the box sides.
+    # z = -0.04 from box centre (1.24m) = 1.20m — hands must be BELOW this to grab from underneath.
+    # The arm init pose below ensures hands start below handle height on spawn.
     carry_box_left_hand_target_offset_b = (0.0, 0.19, -0.04)
     carry_box_right_hand_target_offset_b = (0.0, -0.19, -0.04)
 
@@ -292,31 +397,78 @@ class H1LiftCarryEnvCfg(H1CarryBoxEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        # Spawn robot directly in front of the table (handles are at 0.55m, robot is at 0.22m, distance 0.33m)
-        self.scene.robot.init_state.pos = (0.22, 0.0, 1.05)
+        # Spawn robot directly in front of the table (handles are at 0.55m, robot is at 0.12m, distance 0.43m)
+        # Extra clearance so knees don't contact the table on spawn and during the pivot turn
+        self.scene.robot.init_state.pos = (0.12, 0.0, 1.05)
 
         # Disable base_contact termination to prevent resets when touching the table
         self.terminations.base_contact = None
+
+        # Disable feet air time for the high-level task policy (locomotion is frozen)
+        self.rewards.feet_air_time.weight = 0.0
+        self.curriculum.feet_air_time = None
 
         # Override the command manager to use our custom FSM velocity command generator
         self.commands.base_velocity.class_type = LazyFsmCommandClassWrapper
         self.commands.base_velocity.heading_command = True
         self.commands.base_velocity.heading_control_stiffness = 1.0
 
-        # Pre-pose arms slightly forward and rolled OUTWARD to clear the box Y boundaries
+        # Arm init: shoulder_pitch=-0.5 + elbow=1.6.
+        # From the forearm-direction scan:
+        #   pitch=-1.0: forearm TIP reaches x=0.61m (env) -- INSIDE the box at 0.55m -> EXPLODES
+        #   pitch=-0.5: forearm TIP at x=0.37m -- 10cm short of box front (0.475m) -> SAFE
+        # Forearm direction at pitch=-0.5: fdir_x=0.638, fdir_z=-0.749
+        #   -> upper arm goes forward-and-down, forearm then bends MORE downward
+        #   -> creates a visible elbow 'L' shape, arms are NOT just straight
+        # Arm COM: z_w=1.21m (at handle height), x_b=0.18m (reaching forward)
+        # roll=0.25: spreads arms to y=0.24m (handles are at y=+/-0.19m, close match)
         self.scene.robot.init_state.joint_pos.update({
-            "left_shoulder_pitch": -0.6,
-            "right_shoulder_pitch": -0.6,
-            "left_shoulder_roll": 0.18,    # Rolled outward
-            "right_shoulder_roll": -0.18,  # Rolled outward
-            "left_elbow": 0.35,            # Bent forward/downward
-            "right_elbow": 0.35,           # Bent forward/downward
+            "left_shoulder_pitch": -0.5,
+            "right_shoulder_pitch": -0.5,
+            "left_shoulder_roll": 0.25,
+            "right_shoulder_roll": -0.25,
+            "left_shoulder_yaw": 0.0,
+            "right_shoulder_yaw": 0.0,
+            "left_elbow": 1.6,
+            "right_elbow": 1.6,
         })
+
+        # CRITICAL: Override arm action offsets to match the new init pose.
+        # With use_default_offset=False, arm target = action * scale + offset.
+        # Offsets must match init pose so policy starts at zero action near the handles.
+        self.actions.arms.offset = {
+            "left_shoulder_pitch": -0.5,
+            "right_shoulder_pitch": -0.5,
+            "left_shoulder_roll": 0.25,
+            "right_shoulder_roll": -0.25,
+            "left_shoulder_yaw": 0.0,
+            "right_shoulder_yaw": 0.0,
+            "left_elbow": 1.6,
+            "right_elbow": 1.6,
+        }
+
+        # Reduce joint_deviation_arms weight: the H1 USD default poses (shoulder_pitch≈0.28)
+        # differ from our new init (shoulder_pitch=1.2). The deviation penalty is computed
+        # relative to the articulation's USD defaults, so it would fight the new reaching
+        # configuration. Keep it small (near zero) just for regularisation.
+        self.rewards.joint_deviation_arms.weight = -0.001
 
         # Set standard range limits for the underlying sampler
         self.commands.base_velocity.ranges.lin_vel_x = (-0.25, 0.25)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
+
+        # 1. Increase arm action scale to 0.25 to provide stronger lifting targets/range
+        self.actions.arms.scale = 0.25
+
+        # 2. Box Mass Curriculum: Start at ~1.0kg - 1.5kg (20-30% of 5kg) and ramp to 5.0kg
+        self.events.carry_box_mass.params["mass_distribution_params"] = [0.2, 0.3]
+        self.curriculum.carry_box_mass.params["stages"] = [
+            [3000, [0.2, 0.4]],    # up to 2.0 kg
+            [10000, [0.4, 0.6]],   # up to 3.0 kg
+            [20000, [0.6, 0.8]],   # up to 4.0 kg
+            [30000, [0.8, 1.0]],   # up to 5.0 kg
+        ]
 
 
 @configclass

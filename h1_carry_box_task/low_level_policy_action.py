@@ -121,7 +121,8 @@ class FrozenLocomotionPolicyAction(ActionTerm):
     def apply_actions(self):
         if self._counter % self.cfg.low_level_decimation == 0:
             low_level_obs = self._low_level_obs_manager.compute_group("ll_policy")
-            self._low_level_full_actions[:] = self.policy(low_level_obs)
+            with torch.no_grad():
+                self._low_level_full_actions[:] = self.policy(low_level_obs).detach()
             self._counter = 0
 
         controlled_joint_actions = self._low_level_full_actions.index_select(1, self._controlled_action_indices)
